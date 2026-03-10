@@ -1,0 +1,85 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Compiled Binaries (Go)
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+*.o
+*.a
+*.out
+
+# Go build cache
+.go/
+vendor/
+
+# Node/Frontend
+node_modules/
+dist/
+build/
+.parcel-cache/
+client/dist
+client/node_modules
+
+# NPM
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.code-workspace
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.postgres
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# AWS Lambda/Deployment
+.aws-sam/
+sam-tests/
+
+# Uploads (local testing)
+uploads/*
+!uploads/.gitkeep
+
+# Private keys, credentials
+private/
+secrets/
+*.pem
+*.key
+
+# IDE Settings
+.vscode/settings.json
+.env.production.local
