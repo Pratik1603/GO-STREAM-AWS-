@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"myproject/models"
-	"myproject/store"
+	"server/myproject/models"
+	"server/myproject/store"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -262,7 +262,7 @@ func (s *MovieService) DeleteMovie(id, userID int, userRole string) error {
 	}
 
 	// Admin can delete anything, otherwise only the owner can
-	if userRole != "admin"{
+	if userRole != "admin" {
 		return store.ErrAccessDenied
 	}
 

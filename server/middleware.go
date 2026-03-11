@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"myproject/services"
+	"server/myproject/services"
 
 	"github.com/gin-gonic/gin"
 )

@@ -1,4 +1,4 @@
-module myproject
+module server/myproject
 
 go 1.24.0
 

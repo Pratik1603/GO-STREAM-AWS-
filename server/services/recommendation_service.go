@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"myproject/models"
-	"myproject/store"
+	"server/myproject/models"
+	"server/myproject/store"
 )
 
 type RecommendationService struct {

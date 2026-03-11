@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"myproject/models"
-	"myproject/services"
+	"server/myproject/models"
+	"server/myproject/services"
 
 	"github.com/gin-gonic/gin"
 )

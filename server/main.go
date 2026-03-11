@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"myproject/services"
-	"myproject/store"
+	"server/myproject/services"
+	"server/myproject/store"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"

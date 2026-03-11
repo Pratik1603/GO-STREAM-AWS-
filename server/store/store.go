@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"myproject/models"
+	"server/myproject/models"
 )
 
 var ErrNotFound = errors.New("not found")

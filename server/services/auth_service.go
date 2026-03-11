@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"myproject/models"
-	"myproject/store"
+	"server/myproject/models"
+	"server/myproject/store"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
