@@ -418,7 +418,7 @@ const TitleDetailsPage = () => {
             {/* Similar Movies Section */}
             {similarMovies.length > 0 && (
                 <div className="px-4 md:px-12 py-8 max-w-7xl mx-auto">
-                    <h2 className="text-2xl font-bold mb-6 border-b border-zinc-800 pb-2">Similar Titles</h2>
+                    <h2 className="text-2xl font-bold mb-6 border-b border-zinc-800 pb-2">Similar Movies</h2>
                     <div className="flex gap-4 overflow-x-auto pb-4 scroll-smooth" style={{ scrollBehavior: 'smooth' }}>
                         {similarMovies.map(movie => (
                             <div
