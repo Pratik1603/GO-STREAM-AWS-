@@ -8,7 +8,9 @@ const TitleDetailsPage = () => {
     const { id } = useParams();
     const [titleData, setTitleData] = useState(null);
     const [episodes, setEpisodes] = useState([]);
+    const [similarMovies, setSimilarMovies] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadingSimilar, setLoadingSimilar] = useState(false);
     const [error, setError] = useState('');
 
     // Admin edit state
@@ -82,6 +84,30 @@ const TitleDetailsPage = () => {
         };
 
         fetchDetails();
+    }, [id, user]);
+
+    // Fetch similar movies
+    useEffect(() => {
+        const fetchSimilarMovies = async () => {
+            if (!user?.token || !id) return;
+            setLoadingSimilar(true);
+            try {
+                const res = await fetch(
+                    `${API_ENDPOINTS.MOVIES}/${id}/similar?limit=8`,
+                    { headers: { 'Authorization': `Bearer ${user.token}` } }
+                );
+                if (res.ok) {
+                    const data = await res.json();
+                    setSimilarMovies(data.similar || []);
+                }
+            } catch (err) {
+                console.error('Failed to fetch similar movies:', err);
+            } finally {
+                setLoadingSimilar(false);
+            }
+        };
+
+        fetchSimilarMovies();
     }, [id, user]);
 
     const handleEditOpen = () => {
@@ -388,6 +414,41 @@ const TitleDetailsPage = () => {
                     )}
                 </div>
             </div>
+
+            {/* Similar Movies Section */}
+            {similarMovies.length > 0 && (
+                <div className="px-4 md:px-12 py-8 max-w-7xl mx-auto">
+                    <h2 className="text-2xl font-bold mb-6 border-b border-zinc-800 pb-2">Similar Titles</h2>
+                    <div className="flex gap-4 overflow-x-auto pb-4 scroll-smooth" style={{ scrollBehavior: 'smooth' }}>
+                        {similarMovies.map(movie => (
+                            <div
+                                key={movie.id}
+                                onClick={() => navigate(`/title/${movie.id}`)}
+                                className="group flex-shrink-0 w-48 cursor-pointer"
+                            >
+                                <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden mb-3 border border-zinc-800 group-hover:border-netflix-red transition">
+                                    <img
+                                        src={movie.thumbnail_url || `https://placehold.co/320x180/111/333?text=${encodeURIComponent(movie.title)}`}
+                                        alt={movie.title}
+                                        className="w-full h-full object-cover group-hover:brightness-75 transition duration-300"
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="bg-netflix-red rounded-full p-3 border-2 border-white">
+                                            <Play fill="white" size={24} />
+                                        </div>
+                                    </div>
+                                </div>
+                                <h3 className="text-sm font-semibold text-white group-hover:text-netflix-red transition line-clamp-2">
+                                    {movie.title}
+                                </h3>
+                                {movie.release_year && (
+                                    <p className="text-xs text-gray-400 mt-1">{movie.release_year}</p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
