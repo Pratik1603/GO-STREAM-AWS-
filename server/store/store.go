@@ -138,7 +138,7 @@ func (s *Store) GetMovie(id int) (*models.Movie, error) {
 	return &m, nil
 }
 
-func (s *Store) ListMoviesForUser(userID int) ([]models.Movie, error) {
+func (s *Store) ListMoviesForUser() ([]models.Movie, error) {
 	// Only return root content (movies and series) in Browse, not individual episodes
 	rows, err := s.db.Query(`
 		SELECT id, title, description, 
@@ -327,80 +327,4 @@ func (s *Store) UpdateMovieEmbedding(movieID int, embedding []float64) error {
 	embJSON, _ := json.Marshal(embedding)
 	_, err := s.db.Exec(`UPDATE movies SET embedding = $1 WHERE id = $2`, embJSON, movieID)
 	return err
-}
-
-func (s *Store) FindSimilarMovies(excludeID int, embedding []float64, limit int) ([]models.Movie, error) {
-	// For production, use pgvector extension for efficient similarity search
-	// This is a simplified version that loads all movies
-	rows, err := s.db.Query(`
-		SELECT id, title, description, file_path, thumbnail_path, duration, 
-		       owner_id, genres, tags, mood, embedding, created_at, updated_at
-		FROM movies WHERE id != $1 AND embedding IS NOT NULL`, excludeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	type scoredMovie struct {
-		movie models.Movie
-		score float64
-	}
-	var scored []scoredMovie
-
-	for rows.Next() {
-		var m models.Movie
-		var genresJSON, tagsJSON, embJSON []byte
-		rows.Scan(&m.ID, &m.Title, &m.Description, &m.FilePath, &m.ThumbnailPath,
-			&m.Duration, &m.OwnerID, &genresJSON, &tagsJSON, &m.Mood, &embJSON, &m.CreatedAt, &m.UpdatedAt)
-		json.Unmarshal(genresJSON, &m.Genres)
-		json.Unmarshal(tagsJSON, &m.Tags)
-		json.Unmarshal(embJSON, &m.Embedding)
-
-		if m.Embedding != nil {
-			score := cosineSimilarity(embedding, m.Embedding)
-			scored = append(scored, scoredMovie{m, score})
-		}
-	}
-
-	// Sort by similarity score
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
-
-	var result []models.Movie
-	for i := 0; i < len(scored) && i < limit; i++ {
-		result = append(result, scored[i].movie)
-	}
-	return result, nil
-}
-
-func cosineSimilarity(a, b []float64) float64 {
-	if len(a) != len(b) {
-		return 0
-	}
-	var dot, normA, normB float64
-	for i := range a {
-		dot += a[i] * b[i]
-		normA += a[i] * a[i]
-		normB += b[i] * b[i]
-	}
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-	return dot / (sqrt(normA) * sqrt(normB))
-}
-
-func sqrt(x float64) float64 {
-	if x <= 0 {
-		return 0
-	}
-	z := x / 2
-	for i := 0; i < 10; i++ {
-		z = z - (z*z-x)/(2*z)
-	}
-	return z
 }

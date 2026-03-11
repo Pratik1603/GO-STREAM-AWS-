@@ -36,7 +36,7 @@ func (s *MovieService) SetS3Client(client *s3.Client) {
 }
 
 func (s *MovieService) ListMovies(userID int) ([]models.Movie, error) {
-	movies, err := s.store.ListMoviesForUser(userID)
+	movies, err := s.store.ListMoviesForUser()
 	if movies == nil {
 		return []models.Movie{}, nil
 	}

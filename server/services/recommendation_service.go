@@ -1,11 +1,7 @@
 package services
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
 	"strings"
 
 	"server/myproject/models"
@@ -13,16 +9,13 @@ import (
 )
 
 type RecommendationService struct {
-	apiKey  string
-	baseURL string
-	store   *store.Store
+	store *store.Store
 }
 
 func NewRecommendationService(store *store.Store) *RecommendationService {
 	return &RecommendationService{
-		apiKey:  os.Getenv("OPENAI_API_KEY"),
-		baseURL: "https://api.openai.com/v1",
-		store:   store,
+
+		store: store,
 	}
 }
 
@@ -61,24 +54,25 @@ type EmbeddingResponse struct {
 
 // Get recommendations based on user's watch history and preferences
 func (rs *RecommendationService) GetRecommendations(userID int, limit int) ([]models.Movie, error) {
-	// Get user's watch history
+
 	history, err := rs.store.GetWatchHistory(userID, 20)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get all available movies for the user
-	allMovies, err := rs.store.ListMoviesForUser(userID)
+	allMovies, err := rs.store.ListMoviesForUser()
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter out already watched movies
 	watchedIDs := make(map[int]bool)
+	var watchedMovies []models.Movie
 	var watchedTitles []string
+
 	for _, h := range history {
 		watchedIDs[h.MovieID] = true
 		if movie, _ := rs.store.GetMovie(h.MovieID); movie != nil {
+			watchedMovies = append(watchedMovies, *movie)
 			watchedTitles = append(watchedTitles, fmt.Sprintf("%s: %s", movie.Title, movie.Description))
 		}
 	}
@@ -96,157 +90,238 @@ func (rs *RecommendationService) GetRecommendations(userID int, limit int) ([]mo
 		return []models.Movie{}, nil
 	}
 
-	// Use OpenAI to rank recommendations
-	recommendedIDs, err := rs.getAIRecommendations(watchedTitles, unwatchedInfo, limit)
-	if err != nil {
-		// Fallback: return recent unwatched movies
-		if len(unwatched) > limit {
-			return unwatched[:limit], nil
+	return rs.getRecommendationsBasic(watchedMovies, unwatched, limit)
+}
+
+// Get recommendations using genre and keyword matching from watch history
+func (rs *RecommendationService) getRecommendationsBasic(watchedMovies []models.Movie, unwatchedMovies []models.Movie, limit int) ([]models.Movie, error) {
+	if len(watchedMovies) == 0 {
+
+		if len(unwatchedMovies) > limit {
+			return unwatchedMovies[:limit], nil
 		}
-		return unwatched, nil
+		return unwatchedMovies, nil
 	}
 
-	// Map recommended IDs to movies
-	var recommended []models.Movie
-	idToMovie := make(map[int]models.Movie)
-	for _, m := range unwatched {
-		idToMovie[m.ID] = m
+	watchedGenreMap := make(map[string]int)
+	var allWatchedKeywords []string
+
+	for _, movie := range watchedMovies {
+
+		for _, genre := range movie.Genres {
+			watchedGenreMap[strings.ToLower(genre)]++
+		}
+		keywords := extractKeywords(movie.Description)
+		allWatchedKeywords = append(allWatchedKeywords, keywords...)
 	}
-	for _, id := range recommendedIDs {
-		if m, ok := idToMovie[id]; ok {
-			recommended = append(recommended, m)
+
+	keywordMap := make(map[string]int)
+	for _, kw := range allWatchedKeywords {
+		keywordMap[kw]++
+	}
+
+	type movieScore struct {
+		movie models.Movie
+		score float64
+	}
+
+	var scores []movieScore
+
+	for _, m := range unwatchedMovies {
+		score := 0.0
+
+		genreMatches := 0
+		for _, mGenre := range m.Genres {
+			if count, exists := watchedGenreMap[strings.ToLower(mGenre)]; exists {
+				genreMatches += count // Weight by how many watched movies had this genre
+			}
+		}
+		if len(watchedGenreMap) > 0 {
+			avgGenresWatched := 0
+			for _, count := range watchedGenreMap {
+				avgGenresWatched += count
+			}
+			score += (float64(genreMatches) / float64(avgGenresWatched)) * 70
+		}
+		mDescLower := strings.ToLower(m.Description)
+		keywordMatches := 0
+		for keyword := range keywordMap {
+			if strings.Contains(mDescLower, keyword) {
+				keywordMatches++
+			}
+		}
+		if len(keywordMap) > 0 {
+			score += (float64(keywordMatches) / float64(len(keywordMap))) * 20
+		}
+
+		diversityBonus := 0.0
+		for _, genre := range m.Genres {
+			if count, exists := watchedGenreMap[strings.ToLower(genre)]; !exists {
+				diversityBonus += 5
+			} else if count <= 1 {
+				diversityBonus += 3
+			}
+		}
+		if diversityBonus > 10 {
+			diversityBonus = 10
+		}
+		score += diversityBonus
+
+		if score > 0 {
+			scores = append(scores, movieScore{movie: m, score: score})
 		}
 	}
 
-	return recommended, nil
+	for i := 0; i < len(scores)-1; i++ {
+		for j := i + 1; j < len(scores); j++ {
+			if scores[j].score > scores[i].score {
+				scores[i], scores[j] = scores[j], scores[i]
+			}
+		}
+	}
+
+	var result []models.Movie
+	maxResults := limit
+	if len(scores) < maxResults {
+		maxResults = len(scores)
+	}
+	for i := 0; i < maxResults; i++ {
+		result = append(result, scores[i].movie)
+	}
+
+	return result, nil
 }
 
-func (rs *RecommendationService) getAIRecommendations(watched, available []string, limit int) ([]int, error) {
-	if rs.apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key not configured")
-	}
-
-	prompt := fmt.Sprintf(`You are a movie recommendation system. Based on the user's watch history, recommend the best movies from the available list.
-
-USER'S WATCH HISTORY:
-%s
-
-AVAILABLE MOVIES (format: ID|Title|Description|Genres):
-%s
-
-Return ONLY a JSON array of movie IDs in order of relevance, maximum %d recommendations.
-Example: [5, 12, 3, 8]
-
-Consider:
-- Genre preferences based on watch history
-- Similar themes and storylines
-- Diversity in recommendations
-- Quality and popularity signals from descriptions`,
-		strings.Join(watched, "\n"),
-		strings.Join(available, "\n"),
-		limit)
-
-	req := ChatRequest{
-		Model: "gpt-4o-mini",
-		Messages: []ChatMessage{
-			{Role: "system", Content: "You are a movie recommendation AI. Respond only with valid JSON arrays of integers."},
-			{Role: "user", Content: prompt},
-		},
-		Temperature: 0.7,
-		MaxTokens:   200,
-	}
-
-	body, _ := json.Marshal(req)
-	httpReq, _ := http.NewRequest("POST", rs.baseURL+"/chat/completions", bytes.NewBuffer(body))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+rs.apiKey)
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var chatResp ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return nil, err
-	}
-
-	if chatResp.Error != nil {
-		return nil, fmt.Errorf("OpenAI error: %s", chatResp.Error.Message)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from OpenAI")
-	}
-
-	// Parse the JSON array of IDs
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	content = strings.Trim(content, "```json\n")
-	content = strings.Trim(content, "```")
-
-	var ids []int
-	if err := json.Unmarshal([]byte(content), &ids); err != nil {
-		return nil, err
-	}
-
-	return ids, nil
-}
-
-// Generate movie embedding for similarity search
-func (rs *RecommendationService) GenerateEmbedding(text string) ([]float64, error) {
-	if rs.apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key not configured")
-	}
-
-	req := EmbeddingRequest{
-		Model: "text-embedding-3-small",
-		Input: text,
-	}
-
-	body, _ := json.Marshal(req)
-	httpReq, _ := http.NewRequest("POST", rs.baseURL+"/embeddings", bytes.NewBuffer(body))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+rs.apiKey)
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var embResp EmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embResp); err != nil {
-		return nil, err
-	}
-
-	if len(embResp.Data) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
-	}
-
-	return embResp.Data[0].Embedding, nil
-}
-
-// Get similar movies using embeddings
+// Get similar movies using embeddings (with fallback for when API key is not available)
 func (rs *RecommendationService) GetSimilarMovies(movieID int, limit int) ([]models.Movie, error) {
 	movie, err := rs.store.GetMovie(movieID)
 	if err != nil {
 		return nil, err
 	}
+	return rs.getSimilarMoviesBasic(movie, limit)
+}
 
-	// Check if embedding exists, generate if not
-	if movie.Embedding == nil {
-		text := fmt.Sprintf("%s. %s. Genres: %s", movie.Title, movie.Description, strings.Join(movie.Genres, ", "))
-		embedding, err := rs.GenerateEmbedding(text)
-		if err != nil {
-			return nil, err
-		}
-		rs.store.UpdateMovieEmbedding(movieID, embedding)
-		movie.Embedding = embedding
+// Get similar movies using genre and keyword matching (no API key required)
+func (rs *RecommendationService) getSimilarMoviesBasic(movie *models.Movie, limit int) ([]models.Movie, error) {
+
+	allMovies, err := rs.store.ListMoviesForUser()
+	if err != nil {
+		return nil, err
 	}
 
-	// Find similar movies using cosine similarity
-	return rs.store.FindSimilarMovies(movieID, movie.Embedding, limit)
+	type movieScore struct {
+		movie models.Movie
+		score float64
+	}
+
+	var scores []movieScore
+	descKeywords := extractKeywords(movie.Description)
+	movieGenreMap := make(map[string]bool)
+	for _, g := range movie.Genres {
+		movieGenreMap[strings.ToLower(g)] = true
+	}
+
+	for _, m := range allMovies {
+		if m.ID == movie.ID {
+			continue
+		}
+
+		score := 0.0
+
+		genreMatches := 0
+		for _, mGenre := range m.Genres {
+			if movieGenreMap[strings.ToLower(mGenre)] {
+				genreMatches++
+			}
+		}
+		if len(movie.Genres) > 0 {
+			score += (float64(genreMatches) / float64(len(movie.Genres))) * 70
+		}
+
+		mDescLower := strings.ToLower(m.Description)
+		keywordMatches := 0
+		for _, keyword := range descKeywords {
+			if strings.Contains(mDescLower, keyword) {
+				keywordMatches++
+			}
+		}
+		if len(descKeywords) > 0 {
+			score += (float64(keywordMatches) / float64(len(descKeywords))) * 20
+		}
+
+		titleScore := calculateTitleSimilarity(movie.Title, m.Title)
+		score += titleScore * 10
+
+		if score > 0 {
+			scores = append(scores, movieScore{movie: m, score: score})
+		}
+	}
+
+	for i := 0; i < len(scores)-1; i++ {
+		for j := i + 1; j < len(scores); j++ {
+			if scores[j].score > scores[i].score {
+				scores[i], scores[j] = scores[j], scores[i]
+			}
+		}
+	}
+
+	var result []models.Movie
+	maxResults := limit
+	if len(scores) < maxResults {
+		maxResults = len(scores)
+	}
+	for i := 0; i < maxResults; i++ {
+		result = append(result, scores[i].movie)
+	}
+
+	return result, nil
+}
+
+func extractKeywords(text string) []string {
+	words := strings.Fields(strings.ToLower(text))
+	var keywords []string
+	stopWords := map[string]bool{
+		"and": true, "the": true, "a": true, "an": true, "or": true, "is": true,
+		"are": true, "was": true, "were": true, "be": true, "been": true,
+		"with": true, "for": true, "of": true, "in": true, "on": true, "at": true,
+	}
+
+	for _, word := range words {
+
+		word = strings.Trim(word, ".,!?;:")
+		if len(word) > 3 && !stopWords[word] {
+			keywords = append(keywords, word)
+		}
+	}
+	return keywords
+}
+
+// Calculate similarity between two movie titles
+func calculateTitleSimilarity(title1, title2 string) float64 {
+	words1 := strings.Fields(strings.ToLower(title1))
+	words2 := strings.Fields(strings.ToLower(title2))
+
+	matches := 0
+	for _, w1 := range words1 {
+		w1 = strings.Trim(w1, ".,!?;:")
+		for _, w2 := range words2 {
+			w2 = strings.Trim(w2, ".,!?;:")
+			if w1 == w2 {
+				matches++
+			}
+		}
+	}
+
+	maxLen := len(words1)
+	if len(words2) > maxLen {
+		maxLen = len(words2)
+	}
+
+	if maxLen == 0 {
+		return 0
+	}
+
+	return float64(matches) / float64(maxLen)
 }
 
 func (rs *RecommendationService) UpdateWatchProgress(userID, movieID, progress int) error {
